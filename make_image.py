@@ -2,7 +2,7 @@ import PIL
 import Image, ImageDraw
 import ImageFont
 from matplotlib.pyplot import imshow
-from IPython.core.display import display_jpeg
+from IPython.core.display import display
 from PIL import ImageQt
 
 from util.memo import json_memoized
@@ -14,15 +14,49 @@ BU = u'\u6b66'
 SHI = u'\u58eb'
 DO = u'\u9053'
 
-def show(im):
-    jpeg_str = im.tostring('jpeg', im.mode)
-    display_jpeg(jpeg_str, raw=True)
+# display_pil.py
+# source: http://mail.scipy.org/pipermail/ipython-user/2012-March/009706.html
+# by 'MinRK'
+import Image
+from IPython.core import display
+from io import BytesIO
 
-def main():
+def display_pil_image(im):
+    """displayhook function for PIL Images, rendered as PNG"""
+    b = BytesIO()
+    im.save(b, format='png')
+    data = b.getvalue()
+
+    ip_img = display.Image(data=data, format='png', embed=True)
+    return ip_img._repr_png_()
+
+# register display func with PNG formatter:
+png_formatter = get_ipython().display_formatter.formatters['image/png']
+png_formatter.for_type(Image.Image, display_pil_image)
+
+BIG_KANJI_SIZE = 294
+
+def _font(name):
+    return ImageFont.truetype(name, BIG_KANJI_SIZE, encoding='unic')
+
+# don't work:
+# font = ImageFont.truetype("simsunb.ttf", font_size, encoding='unic')
+# font = ImageFont.truetype("simpbdo.ttf", font_size, encoding='unic')
+# font = ImageFont.truetype("simpfxo.ttf", font_size, encoding='unic')
+# font = ImageFont.truetype("simpo.ttf", font_size, encoding='unic')
+BIG_KANJI_FONTS = dict(
+    (shortname, _font(fontfname)) for shortname, fontfname in [
+        ('serif', 'simsun.ttc'),
+        ('curvy', "simkai.ttf"),
+        ('gangly', "simfang.ttf"),
+        ('blocky', "simhei.ttf")
+    ]
+)
+
+def mk_big_char_im():
     chars = [BU, SHI, DO]
-    font_size = 294
-    sizes = dict((c, char_sizes(c)[font_size]) for c in chars)
 
+    sizes = dict((c, char_sizes(c)[BIG_KANJI_SIZE]) for c in chars)
 
     offsets, bounds = zip(*[sizes[c] for c in chars])
     sum_height = sum(h for _, h in bounds)
@@ -35,28 +69,14 @@ def main():
     assert max_width < im_width
     assert extra_height > 0
     
-    im = Image.new('RGBA', im_size)
+    im = Image.new('L', im_size)
     
-    # don't work:
-    # font = ImageFont.truetype("simsunb.ttf", font_size, encoding='unic')
-    # font = ImageFont.truetype("simpbdo.ttf", font_size, encoding='unic')
-    # font = ImageFont.truetype("simpfxo.ttf", font_size, encoding='unic')
-    # font = ImageFont.truetype("simpo.ttf", font_size, encoding='unic')
-
-    # serif:
-    font = ImageFont.truetype("simsun.ttc", font_size, encoding='unic')
-    # artistic/curvy:
-    # font = ImageFont.truetype("simkai.ttf", font_size, encoding='unic')
-    # kinda gangly:
-    # font = ImageFont.truetype("simfang.ttf", font_size, encoding='unic')
-    # big & blocky:
-    # font = ImageFont.truetype("simhei.ttf", font_size, encoding='unic')
-
-
     draw = ImageDraw.Draw(im)
     
     center_x = float(im_width) / 2
     stride = float(im_height) / len(chars)
+
+    font = BIG_KANJI_FONTS['serif']
 
     for i, c in enumerate(chars):
         center_y = (i + .5) * stride
@@ -71,9 +91,62 @@ def main():
         ul_x -= off_x
         ul_y -= off_y
 
-        draw.text((ul_x, ul_y), c, font=font, fill=(255,255,255,255))
+        draw.text((ul_x, ul_y), c, font=font, fill=255)
 
-    show(im)
+    return im
+
+def mk_rand_bin_img_from_mask(mask_im):
+    bin_font = ImageFont.truetype('consola.ttf', 9)
+    bin_color = (0xc8, 0xff, 0xc8, 0xff)
+
+    im = Image.new('RGBA', mask_im.size)
+    draw = ImageDraw.Draw(im)
+
+    width, height = im.size
+
+    one = bin_font.getsize('1')
+    zero = bin_font.getsize('0')
+    
+    start_x = 0
+    start_y = 0
+
+    import random
+
+    for start_y in xrange(start_y, height, zero[1]):
+        randstr = ''.join(random.choice(['1', '0']) for _ in xrange(100))
+        draw.text((start_x, start_y), randstr, font=bin_font, fill=bin_color)
+
+    display.display(im)
+
+    import ImageMath
+
+    bands = im.split()
+
+    bands = [
+        ImageMath.eval(
+            'convert(min(mask, band), "L")',
+            mask = mask_im,
+            band = band
+        )
+        for band in bands
+    ]
+
+    new_im = Image.merge('RGBA', bands)
+
+    with file('foo.jpg', 'wb') as f:
+        new_im.save(f, format='jpeg')
+
+    display.display(new_im)
+
+
+def main():
+    im = mk_big_char_im()
+    
+    display.display(im)
+
+    mk_rand_bin_img_from_mask(im)
+
+    return im
 
 def box_around(x, y, w, h=None):
     if h is None:
@@ -118,9 +191,6 @@ def char_size(ch, size):
     width = (max_i - min_i, max_j - min_j)
     print offset, width
 
-    # jpeg_str = im.tostring('jpeg', img_mode)
-    # display_jpeg(jpeg_str, raw=True)
-
     return offset, width
 
 # for i, c in enumerate(chars):
@@ -138,7 +208,6 @@ def char_size(ch, size):
 #         draw.rectangle(box, color)
 #     _box((img_center_w, ch_center_h), 'red')
 #     _box((ch_ul_x, ch_ul_y), 'yellow')
-
 
 
 if __name__ == '__main__':
